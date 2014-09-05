@@ -1,0 +1,11 @@
+# Vi files
+.*.swp
+
+# Directories of object files
+obj-*
+
+# Directory of build results
+lib
+
+# RDA
+rda
