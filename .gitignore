@@ -9,3 +9,10 @@ lib
 
 # RDA
 rda
+
+# Symbolic links
+build.mk
+build/config_release.mk
+build/config_debug.mk
+build/main.mk
+

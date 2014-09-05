@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 
 namespace {   // anonymous namespace
 
@@ -53,21 +54,23 @@ uint16_t crc16compute(uint8_t *bytes, uint16_t len)
 int openPort(int &outFd, const char *deviceName) {
     struct termios tio;
 
-    int fd = open(deviceName, O_RDWR | O_NOCTTY | O_NDELAY);
+    int fd = open(deviceName, O_RDWR | O_NOCTTY);
     if(fd < 0) {
         outFd = 0;
         return errno;
     }
 
-    tcgetattr(fd, &tio); /* save current serial port settings */
+    tcgetattr(fd, &tio);  // Is this necessary?
 
     tio.c_cflag = CS8 | CLOCAL | CREAD;
     tio.c_iflag = IGNPAR;
     tio.c_oflag = 0;
     tio.c_lflag = 0;
+#if 1
     for (unsigned i = 0; i < NCCS; i++) {
         tio.c_cc[i] = _POSIX_VDISABLE;
     }
+#else
     tio.c_cc[VINTR]    = 0;
     tio.c_cc[VQUIT]    = 0;
     tio.c_cc[VERASE]   = 0;
@@ -85,6 +88,7 @@ int openPort(int &outFd, const char *deviceName) {
     tio.c_cc[VWERASE]  = 0;
     tio.c_cc[VLNEXT]   = 0;
     tio.c_cc[VEOL2]    = 0;
+#endif
     cfsetispeed(&tio, B115200);
     cfsetospeed(&tio, B115200);
 
@@ -97,12 +101,15 @@ int openPort(int &outFd, const char *deviceName) {
 
 }  // end anonymous namespace
 
-int main() {
+int main(int argc, char **argv) {
     crc16init();
     int fd = 0;
-    int err = openPort(fd, "/dev/ttymxc1");
+    const char *deviceName = "/dev/ttymxc1";
+    if (argc > 1) deviceName = argv[1];
+    printf("Using device %s\n", deviceName);
+    int err = openPort(fd, deviceName);
     if (err) {
-        printf("Error, errno is %d (%p)", err, err);
+        printf("Error, errno is %d (%s)\n", err, strerror(err));
         return 1;
     }
     close(fd);
