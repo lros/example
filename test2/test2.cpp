@@ -102,9 +102,16 @@ int openPort(int &outFd, const char *deviceName) {
 }  // end anonymous namespace
 
 int main(int argc, char **argv) {
+    printf("RDA_MODULE is %s\n", RDA_MODULE);
     crc16init();
     int fd = 0;
+#if defined RDA_TARGET_imx27
     const char *deviceName = "/dev/ttymxc1";
+#elif defined RDA_TARGET_linux
+    const char *deviceName = "/dev/ttyS0";
+#else
+    #error Unknown RDA_TARGET
+#endif
     if (argc > 1) deviceName = argv[1];
     printf("Using device %s\n", deviceName);
     int err = openPort(fd, deviceName);

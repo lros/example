@@ -2,5 +2,5 @@
 # Specifics for building on the Linux platform - RDA build system.
 
 # Legal targets
-_TARGETS := imx27
+_TARGETS := imx27 linux
 

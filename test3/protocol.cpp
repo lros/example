@@ -6,6 +6,10 @@
 #include <errno.h>
 #include <string.h>
 
+#if defined RDA_CONFIG_debug
+#include <stdio.h>
+#endif
+
 static uint16_t gCrcTable[256];
 static const uint16_t kCrcPolynomial = 0xa001;
 static const char *kDeviceName = "/dev/ttymxc1";
@@ -50,14 +54,15 @@ static uint16_t crc16compute(uint8_t *bytes, uint16_t len)
     return(crc);
 }
 
-static int gPortFd = 0;
+static int gPortFd = -1;
 
 static const char *openPort(const char *deviceName) {
+#if defined RDA_TARGET_imx27
     struct termios tio;
 
     int fd = open(deviceName, O_RDWR | O_NOCTTY);
     if(fd < 0) {
-        gPortFd = 0;
+        gPortFd = -1;
         return strerror(errno);
     }
 
@@ -97,7 +102,19 @@ static const char *openPort(const char *deviceName) {
     tcsetattr(fd, TCSANOW, &tio);
 
     gPortFd = fd;
+#elif defined RDA_TARGET_linux
+    gPortFd = 0;
+#else
+#error Unknown RDA_TARGET.
+#endif
     return NULL;
+}
+
+static void printData(const char *message, uint8_t *start, unsigned length) {
+    printf("%s\n", message);
+    for (unsigned i = 0; i < length; i++)
+        printf("%02x ", start[i]);
+    printf("\n");
 }
 
 const char *bc::init() {
@@ -112,7 +129,7 @@ const uint8_t ESC_END = 0xdc;
 
 const char *bc::send(uint8_t *data, unsigned length, unsigned channel,
         bool wantAck) {
-    // TODO print out for debug
+    printData("send(): initial content", data + BUFFER_HEADER, length);
     // Packetize
     unsigned flags = 0;
     if (wantAck) flags |= 0x08;
@@ -124,11 +141,11 @@ const char *bc::send(uint8_t *data, unsigned length, unsigned channel,
     data[4] = (flags << 4) | ((length >> 8) & 0x0f);
     data[5] = channel;
     data[6] = 1;   // sequence number TODO
-    // TODO print out for debug
+    length += BUFFER_HEADER;
+    printData("send(): packet with header", data, length);
 
     // Escape
     unsigned nEscapes = 0;
-    length += BUFFER_HEADER;
     for (unsigned i = 0; i < length; i++) {
         if ((data[i] == ESC) || (data[i] == END)) nEscapes++;
     }
@@ -150,10 +167,12 @@ const char *bc::send(uint8_t *data, unsigned length, unsigned channel,
     // Add END and send
     length += nEscapes;
     data[length++] = END;
-    // TODO print out for debug
+    printData("send(): escaped packet", data, length);
+#if defined RDA_TARGET_imx27
     int n = write(gPortFd, data, length);
     if (n != length) {
     }
+#endif
     return NULL;
 }
 
@@ -162,7 +181,9 @@ const char *bc::receive(uint8_t *data, unsigned &length) {
 }
 
 const char *bc::finish() {
-    if (gPortFd != 0) close(gPortFd);
+#if defined RDA_TARGET_imx27
+    if (gPortFd != -1) close(gPortFd);
+#endif
     return NULL;
 }
 
