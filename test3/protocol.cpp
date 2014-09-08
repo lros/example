@@ -171,13 +171,51 @@ const char *bc::send(uint8_t *data, unsigned length, unsigned channel,
 #if defined RDA_TARGET_imx27
     int n = write(gPortFd, data, length);
     if (n != length) {
+        return "write() returned wrong length";
     }
 #endif
     return NULL;
 }
 
 const char *bc::receive(uint8_t *data, unsigned &length) {
-    return "not implemented";
+    uint8_t *readPointer = data;
+    unsigned readLength = length;
+    fd_set readfds;
+    struct timeval timeout;
+    while (1) {
+        FD_ZERO(&readfds);
+        FD_SET(gPortFd, &readfds);
+        timeout.tv_sec = 0;   // seconds
+        timeout.tv_usec = 100 * 1000;   // microseconds
+        int err = select(gPortFd + 1, &readfds, NULL, NULL, &timeout);
+        if (err < 0) return "select() returned an error";
+        if (err == 0) {
+            // timed out
+            // TODO do something?
+        } else {
+            // ready to read
+            err = read(gPortFd, readPointer, readLength);
+            if (err < 0) {
+                // error
+                return "read() returned an error";
+            }
+            // err is the number of bytes actually read
+            readPointer += err;
+            readLength -= err;
+            // Simple test if we got a packet
+            for (uint8_t *p = data; p < readPointer; p++) {
+                if (*p == END) {
+                    // Got a packet
+                    length = readLength;
+                    printData("got packet", data, length);
+                    return NULL;
+                }
+            }
+            if (readLength == 0) {
+                return "Full buffer but no end of packet.";
+            }
+        }
+    }
 }
 
 const char *bc::finish() {

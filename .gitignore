@@ -7,8 +7,9 @@ obj-*
 # Directory of build results
 lib
 
-# RDA
+# aliens
 rda
+boost-*-prebuild-imx27
 
 # Symbolic links
 build.mk
