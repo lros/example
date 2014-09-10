@@ -1,7 +1,8 @@
 # RDA-style makefile
 
 SOURCES := test4.cpp
-LDLIBS += -lboost_date_time -lboost_thread -lboost_system
+LDLIBS += -lboost_date_time -lboost_thread
+#LDLIBS += -lboost_date_time -lboost_thread -lboost_system
 
 # Bypass rdainfo.py
 _HOST := linux
