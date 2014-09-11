@@ -1,24 +1,24 @@
 #include <stdint.h>
 
-namespace bc {  // BaseComms
+namespace bc {  // Base Communications
 
-    struct buffer {
+    struct Buffer {
         static const unsigned SIZE = 256;
         static const unsigned HEADER = 7;
 
-        uint8_t data[SIZE];
-        unsigned length;  // including header
+        uint8_t mData[SIZE];
+        unsigned mLength;  // including header
 
-        void setContentLength(unsigned cl) {
-            length = HEADER + cl;
+        void contentLength(unsigned cl) {
+            mLength = HEADER + cl;
         }
 
         unsigned contentLength() {
-            return length - HEADER;
+            return mLength - HEADER;
         }
 
         uint8_t *content() {
-            return data + HEADER;
+            return mData + HEADER;
         }
 
     };  // end class buffer
@@ -26,16 +26,24 @@ namespace bc {  // BaseComms
     // Return values are NULL for OK or a string on failure.
 
     // Open serial port, start receive thread, etc.
-    const char *init();
+    void init();
 
     // Send data in buffer.  Assumes content begins at data[BUFFER_HEADER].
     // Length does not count header, only the content.
     // Fills in header, escapes packet, and waits until data is sent.
-    const char *send(buffer &message, unsigned channel,
+    void send(Buffer &message, unsigned channel,
             bool wantAck);
 
-    // Close serial port.
-    const char *finish();
+    // Callback when a packet is received on a channel.
+    // Returns pointer to the Buffer for the send thread to use next.
+    // (Can be message or can swap and keep message.)
+    typedef Buffer *callback_t(Buffer &message);
+
+    // Register a callback for a channel
+    void registerCallback(callback_t *callback, unsigned channel);
+
+    // Stop receive thread and close serial port.
+    void finish();
 
 }  // end namespace bc
 

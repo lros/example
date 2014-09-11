@@ -13,10 +13,11 @@ void threadfn() {
         std::cerr << "hello from threadfn(), #" << i << std::endl;
         {
             boost::lock_guard<boost::mutex> guard(gMutex);
+            //boost::unique_lock<boost::mutex> guard(gMutex);
             gGotData = true;
             gValue = i;
+            gCond.notify_one();
         }
-        gCond.notify_one();
         boost::this_thread::sleep(boost::posix_time::seconds(1));
     }
 }

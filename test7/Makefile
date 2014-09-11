@@ -1,8 +1,6 @@
 # RDA-style makefile
 
-SOURCES := test5.cpp protocol.cpp boostly.cpp
-LDLIBS += -lboost_date_time -lboost_thread
-LDLIBS += -lboost_system
+SOURCES := test7.cpp boostly.cpp
 LDLIBS += -lpthread -lrt
 
 # Bypass rdainfo.py

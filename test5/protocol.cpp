@@ -1,4 +1,5 @@
 #include "protocol.hpp"
+#include "boostly.hpp"
 
 #include <termios.h>
 #include <fcntl.h>
@@ -56,14 +57,14 @@ static uint16_t crc16compute(uint8_t *bytes, uint16_t len)
 
 static int gPortFd = -1;
 
-static const char *openPort(const char *deviceName) {
+static void openPort(const char *deviceName) {
 #if defined RDA_TARGET_imx27
     struct termios tio;
 
     int fd = open(deviceName, O_RDWR | O_NOCTTY);
     if(fd < 0) {
         gPortFd = -1;
-        return strerror(errno);
+        throw strerror(errno);
     }
 
     tcgetattr(fd, &tio);  // Is this necessary?
@@ -107,7 +108,6 @@ static const char *openPort(const char *deviceName) {
 #else
 #error Unknown RDA_TARGET.
 #endif
-    return NULL;
 }
 
 static void printData(const char *message, uint8_t *start, unsigned length) {
@@ -117,9 +117,9 @@ static void printData(const char *message, uint8_t *start, unsigned length) {
     printf("\n");
 }
 
-const char *bc::init() {
+void bc::init() {
     crc16init();
-    return openPort(kDeviceName);
+    openPort(kDeviceName);
 }
 
 const uint8_t ESC = 0xdb;
@@ -127,53 +127,52 @@ const uint8_t ESC_ESC = 0xdd;
 const uint8_t END = 0xc0;
 const uint8_t ESC_END = 0xdc;
 
-const char *bc::send(buffer &message, unsigned channel, bool wantAck) {
-    printData("send(): initial content", message.content(),
+void bc::send(Buffer &message, unsigned channel, bool wantAck) {
+    printData("send(): unmodified content", message.content(),
             message.contentLength());
     // Packetize
     unsigned flags = 0;
     if (wantAck) flags |= 0x08;
     uint16_t crc = crc16compute(message.content(), message.contentLength());
-    message.data[0] = crc & 0xff;
-    message.data[1] = crc >> 8;
-    message.data[2] = 1;    // protocol version
-    message.data[3] = message.contentLength() & 0xff;
-    message.data[4] = (flags << 4) | ((message.contentLength() >> 8) & 0x0f);
-    message.data[5] = channel;
-    message.data[6] = 1;   // sequence number TODO
-    printData("send(): packet with header", message.data, message.length);
+    message.mData[0] = crc & 0xff;
+    message.mData[1] = crc >> 8;
+    message.mData[2] = 1;    // protocol version
+    message.mData[3] = message.contentLength() & 0xff;
+    message.mData[4] = (flags << 4) | ((message.contentLength() >> 8) & 0x0f);
+    message.mData[5] = channel;
+    message.mData[6] = 1;   // sequence number TODO
+    //printData("send(): packet with header", message.mData, message.mLength);
 
     // Escape
     unsigned nEscapes = 0;
-    for (unsigned i = 0; i < message.length; i++) {
-        if ((message.data[i] == ESC) || (message.data[i] == END)) nEscapes++;
+    for (unsigned i = 0; i < message.mLength; i++) {
+        if ((message.mData[i] == ESC) || (message.mData[i] == END)) nEscapes++;
     }
-    unsigned i = message.length;
+    unsigned i = message.mLength;
     unsigned j = i + nEscapes;
     while (i > 0 && j > i) {
         i--;
-        if (message.data[i] == ESC) {
-            message.data[--j] = ESC_ESC;
-            message.data[--j] = ESC;
-        } else if (message.data[i] == END) {
-            message.data[--j] = ESC_END;
-            message.data[--j] = ESC;
+        if (message.mData[i] == ESC) {
+            message.mData[--j] = ESC_ESC;
+            message.mData[--j] = ESC;
+        } else if (message.mData[i] == END) {
+            message.mData[--j] = ESC_END;
+            message.mData[--j] = ESC;
         } else {
-            message.data[--j] = message.data[i];
+            message.mData[--j] = message.mData[i];
         }
     }
 
     // Add END and send
-    message.length += nEscapes;
-    message.data[message.length++] = END;
-    printData("send(): escaped packet", message.data, message.length);
+    message.mLength += nEscapes;
+    message.mData[message.mLength++] = END;
+    //printData("send(): escaped packet", message.mData, message.mLength);
 #if defined RDA_TARGET_imx27
-    int n = write(gPortFd, message.data, message.length);
-    if (n != message.length) {
-        return "write() returned wrong length";
+    int n = write(gPortFd, message.mData, message.mLength);
+    if (n != message.mLength) {
+        throw "write() returned wrong length";
     }
 #endif
-    return NULL;
 }
 
 #if 0
@@ -219,10 +218,9 @@ const char *bc::receive(uint8_t *data, unsigned &length) {
 }
 #endif
 
-const char *bc::finish() {
+void bc::finish() {
 #if defined RDA_TARGET_imx27
     if (gPortFd != -1) close(gPortFd);
 #endif
-    return NULL;
 }
 
