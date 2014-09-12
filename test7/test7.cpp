@@ -36,6 +36,7 @@ int main() {
         while(!gGotData && !timedOut) {
             timedOut = gCond.timed_wait(g, deadline);
             nWakeups++;
+            if (timedOut) std::cerr << "timed out" << std::endl;
         }
         std::cerr << "main() exited inner loop with " << nWakeups
                 << " wakeups; gGotData is "
