@@ -11,9 +11,15 @@
 #include <stdio.h>
 #endif
 
+static const char *kDeviceName = "/dev/ttymxc1";
+static boostly::Thread gReceiveThread;
+static bool gStopReceiveThread;
+static bc::callback_t *gChannelHandler[bc::MAX_CHANNEL];
+static uint8_t gSeq[bc::MAX_CHANNEL];
+static bc::Statistics gStat;
+
 static uint16_t gCrcTable[256];
 static const uint16_t kCrcPolynomial = 0xa001;
-static const char *kDeviceName = "/dev/ttymxc1";
 
 static void crc16init(void)
 {
@@ -110,16 +116,35 @@ static void openPort(const char *deviceName) {
 #endif
 }
 
+#if defined RDA_CONFIG_debug
 static void printData(const char *message, uint8_t *start, unsigned length) {
     printf("%s\n", message);
     for (unsigned i = 0; i < length; i++)
         printf("%02x ", start[i]);
     printf("\n");
 }
+#else
+#define printData(x, y, z) do { } while (0)
+#endif
+
+// forward declaration
+static void receiveThreadFn();
 
 void bc::init() {
     crc16init();
+    gStat.sendPackets = 0;
+    gStat.recvPackets = 0;
+    gStat.badPackets = 0;
+    //gStat.timeouts = 0;
+    for (unsigned i = 0; i < bc::MAX_CHANNEL; i++) {
+        gChannelHandler[i] = NULL;
+    }
+}
+
+void bc::start() {
     openPort(kDeviceName);
+    gStopReceiveThread = false;
+    gReceiveThread = boostly::Thread(receiveThreadFn);
 }
 
 const uint8_t ESC = 0xdb;
@@ -127,7 +152,8 @@ const uint8_t ESC_ESC = 0xdd;
 const uint8_t END = 0xc0;
 const uint8_t ESC_END = 0xdc;
 
-void bc::send(Buffer &message, unsigned channel, bool wantAck) {
+uint8_t bc::send(Buffer &message, unsigned channel, bool wantAck) {
+    if (channel >= bc::MAX_CHANNEL) throw "channel number out of range";
     printData("send(): unmodified content", message.content(),
             message.contentLength());
     // Packetize
@@ -140,7 +166,9 @@ void bc::send(Buffer &message, unsigned channel, bool wantAck) {
     message.mData[3] = message.contentLength() & 0xff;
     message.mData[4] = (flags << 4) | ((message.contentLength() >> 8) & 0x0f);
     message.mData[5] = channel;
-    message.mData[6] = 1;   // sequence number TODO
+    gSeq[channel] += 1;
+    if (gSeq[channel] == 0) gSeq[channel] = 1;
+    message.mData[6] = gSeq[channel];   // sequence number
     //printData("send(): packet with header", message.mData, message.mLength);
 
     // Escape
@@ -173,54 +201,161 @@ void bc::send(Buffer &message, unsigned channel, bool wantAck) {
         throw "write() returned wrong length";
     }
 #endif
+    gStat.sendPackets++;
+    return gSeq[channel];
 }
 
-#if 0
-const char *bc::receive(uint8_t *data, unsigned &length) {
-    uint8_t *readPointer = data;
-    unsigned readLength = length;
+// Forward declaration
+static bc::Buffer *processPacket(bc::Buffer *pBuf);
+
+static void receiveThreadFn() {
+    static bc::Buffer receiveBuffer1, receiveBuffer2;
+    bc::Buffer *pBuf = &receiveBuffer1;
+    bc::Buffer *pNextBuf = &receiveBuffer2;
+    // readPointer is where the next incoming data go.
+    uint8_t *readPointer = pBuf->mData;
+    // readLength is the number of bytes remaining in the buffer.
+    unsigned readLength = bc::Buffer::SIZE;
     fd_set readfds;
     struct timeval timeout;
-    while (1) {
+    while (!gStopReceiveThread) {
         FD_ZERO(&readfds);
         FD_SET(gPortFd, &readfds);
         timeout.tv_sec = 0;   // seconds
         timeout.tv_usec = 100 * 1000;   // microseconds
         int err = select(gPortFd + 1, &readfds, NULL, NULL, &timeout);
-        if (err < 0) return "select() returned an error";
-        if (err == 0) {
-            // timed out
-            // TODO do something?
-        } else {
-            // ready to read
-            err = read(gPortFd, readPointer, readLength);
-            if (err < 0) {
-                // error
-                return "read() returned an error";
+        if (err < 0) throw "select() returned an error";
+        if (err == 0) continue; // timed out
+        // ready to read
+        err = read(gPortFd, readPointer, readLength);
+        if (err < 0) {
+            // error
+            throw "read() returned an error";
+        }
+        // err is the number of bytes actually read
+        uint8_t *p = readPointer;
+        readPointer += err;
+        readLength -= err;
+        while (p < readPointer) {
+            if (*p == END) {
+                // Got a packet
+                // Set the packet length (lop off the END byte)
+                pBuf->mLength = p - pBuf->mData;
+                p++;
+                // Copy any leftover bytes to the next packet
+                unsigned nLeftover = readPointer - p;
+                if (nLeftover > 0)
+                    memcpy(pNextBuf->mData, p, nLeftover); 
+                bc::Buffer *tmp = processPacket(pBuf);
+                // Rotate packet pointers
+                pBuf = pNextBuf;
+                pNextBuf = tmp;
+                // Set up for next read
+                readPointer = pBuf->mData + nLeftover;
+                readLength = bc::Buffer::SIZE - nLeftover;
+                break;
             }
-            // err is the number of bytes actually read
-            readPointer += err;
-            readLength -= err;
-            // Simple test if we got a packet
-            for (uint8_t *p = data; p < readPointer; p++) {
-                if (*p == END) {
-                    // Got a packet
-                    length = readLength;
-                    printData("got packet", data, length);
-                    return NULL;
-                }
-            }
-            if (readLength == 0) {
-                return "Full buffer but no end of packet.";
-            }
+            p++;
+        }
+        if (readLength == 0) {
+            throw "Full buffer but no end of packet.";
         }
     }
-}
+#if defined RDA_CONFIG_debug
+    printf("receiveThreadFn(): normal end\n");
 #endif
+}
+
+static bc::Buffer *processPacket(bc::Buffer *pMessage) {
+    printData("processPacket(): received data", pMessage->mData,
+            pMessage->mLength);
+
+    // unescape
+    unsigned j = 0;  // indexes unescaped data
+    bool afterESC = false;
+    for (unsigned i = 0; i < pMessage->mLength; i++) {
+        // i indexes the original data with escape sequences
+        if (afterESC) {
+            afterESC = false;
+            if (pMessage->mData[i] == ESC_ESC) {
+                pMessage->mData[j++] = ESC;
+            } else if (pMessage->mData[i] == ESC_END) {
+                pMessage->mData[j++] = END;
+            } else {
+                // presumably a mangled packet
+                gStat.badPackets++;
+                printf("bad escape sequence\n");
+                return pMessage;
+            }
+        } else if (pMessage->mData[i] == ESC) {
+            afterESC = true;
+        } else {
+            // An ordinary non-escape byte
+            if (j < i) pMessage->mData[j] = pMessage->mData[i];
+            j++;
+        }
+    }
+    if (afterESC) {
+        // trailing ESC: mangled packet
+        gStat.badPackets++;
+        printf("trailing escape\n");
+        return pMessage;
+    }
+    // j is the length of the unescaped data
+    printData("processPacket(): unescaped data", pMessage->mData, j);
+
+    // Check the header
+    uint16_t crc = crc16compute(&(pMessage->mData[2]), j);
+    if ((pMessage->mData[0] + (pMessage->mData[1] << 8)) != crc) {
+        // bad CRC
+        gStat.badPackets++;
+        printf("bad CRC\n");
+        return pMessage;
+    }
+    if (pMessage->mData[2] != 1) {
+        // bad protocol number
+        gStat.badPackets++;
+        printf("bad protocol number\n");
+        return pMessage;
+    }
+    pMessage->mLength = pMessage->mData[3] + ((pMessage->mData[4] & 0x0f) << 8);
+    if (pMessage->mLength + bc::Buffer::HEADER != j) {
+        // bad packet content length
+        gStat.badPackets++;
+        printf("bad packet length\n");
+        return pMessage;
+    }
+    // Note mLength is valid now
+
+    // If we got here, the packet is deemed good at this level
+    gStat.recvPackets++;
+
+    // Hand off to channel handler
+    bc::callback_t *handler = NULL;
+    if (pMessage->mData[5] < bc::MAX_CHANNEL)
+        handler = gChannelHandler[pMessage->mData[5]];
+    // Silently drop packets if we have no handler
+    if (handler != NULL) return (*handler)(*pMessage);
+
+    // Hand back the same buffer to re-use for now
+    return pMessage;
+}
+
+void registerCallback(bc::callback_t *callback, unsigned channel) {
+    if (channel < bc::MAX_CHANNEL)
+        gChannelHandler[channel] = callback;
+    else throw "channel number too high";
+}
 
 void bc::finish() {
+    gStopReceiveThread = true;
+    gReceiveThread.join();
 #if defined RDA_TARGET_imx27
     if (gPortFd != -1) close(gPortFd);
 #endif
+}
+
+void bc::statistics(Statistics &stat) {
+    stat = gStat;
 }
 
