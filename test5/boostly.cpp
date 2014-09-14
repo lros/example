@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <stdio.h>
 #include "boostly.hpp"
 
 namespace boostly {
@@ -10,10 +11,14 @@ void *Thread::helper(void *pdata) {
     return NULL;
 }
 
-Thread::Thread(threadfn_t *pthreadfn) {
+void Thread::start(threadfn_t *pthreadfn) {
     pfn = pthreadfn;
     int err = pthread_create(&pt, NULL, helper, (void *) this);
     if (err) throw "pthread_create error";
+}
+
+Thread::Thread(threadfn_t *pthreadfn) {
+    start(pthreadfn);
 }
 
 void Thread::join() {

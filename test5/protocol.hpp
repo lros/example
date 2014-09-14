@@ -67,10 +67,10 @@ namespace bc {  // Base Communications
     // registering callbacks.
     void start();
 
-    // Send data in buffer.  Assumes content begins at data[BUFFER_HEADER].
-    // Length does not count header, only the content.
+    // Send data in buffer.
+    // The content and length must be set.
     // Fills in header, escapes packet, and waits until data is sent.
-    // Returns sequence number.  message has been munged on return.
+    // Returns sequence number.  message has been modified on return.
     uint8_t send(Buffer &message, unsigned channel, bool wantAck);
 
     // Callback when a packet is received on a channel.
@@ -92,13 +92,18 @@ namespace bc {  // Base Communications
     void finish();
 
     struct Statistics {
-        uint64_t sendPackets;
+        uint64_t sentBytes;
+        uint64_t sentPackets;
+        uint64_t recvBytes;    // all bytes read
         uint64_t recvPackets;  // good received packets
         uint64_t badPackets;   // bad received packets
-        //uint64_t timeouts;
+        uint64_t dropped;      // good packets with no handler
     };
 
     // Retrieve statistics
+    // Currently there is no guard so the data could be corrupt.
+    // Feel free to read it twice and see if it looks reasonable.
+    // Or, call this after finish().
     void statistics(Statistics &stat);
 
 }  // end namespace bc

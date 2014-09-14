@@ -7,6 +7,8 @@ int main() {
     bc::init();
     bc::start();
     bc::Buffer message;
+    printf("Sizes: int = %zu, long int = %zu, long long int = %zu\n",
+        sizeof (int), sizeof(long int), sizeof(long long int));
     uint8_t content[] = {
         0, 0x80,  // get OD_VERSION (index 0, 4-bytes)
         7, 0x80,  // get OD_TIMER (index 7, 4 bytes)
@@ -27,9 +29,12 @@ int main() {
     bc::finish();
     bc::Statistics stat;
     bc::statistics(stat);
-    printf("%lld packets sent.\n", stat.sendPackets);
-    printf("%lld good packets received.\n", stat.recvPackets);
-    printf("%lld bad packets received.\n", stat.badPackets);
+    printf("%llu bytes sent.\n", stat.sentBytes);
+    printf("%llu packets sent.\n", stat.sentPackets);
+    printf("%llu bytes received.\n", stat.recvBytes);
+    printf("%llu good packets received.\n", stat.recvPackets);
+    printf("%llu bad packets received.\n", stat.badPackets);
+    printf("%llu good packets dropped.\n", stat.dropped);
     return 0;
 }
 

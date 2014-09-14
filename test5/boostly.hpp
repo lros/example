@@ -8,9 +8,11 @@ namespace boostly {
 class Thread {
 public:
     typedef void threadfn_t(void);
+    // Either use default constructor, then start();
+    // or the constructor with the pthreadfn.
     Thread() {};
+    void start(threadfn_t *pthreadfn);
     Thread(threadfn_t *pthreadfn);
-    //Thread &operator =(Thread &other);  Default is fine for this.
     void join();
 private:
     static void *helper(void *);

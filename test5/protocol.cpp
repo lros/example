@@ -110,7 +110,7 @@ static void openPort(const char *deviceName) {
 
     gPortFd = fd;
 #elif defined RDA_TARGET_linux
-    gPortFd = 0;
+    gPortFd = 1;
 #else
 #error Unknown RDA_TARGET.
 #endif
@@ -132,19 +132,22 @@ static void receiveThreadFn();
 
 void bc::init() {
     crc16init();
-    gStat.sendPackets = 0;
+    gStat.sentBytes = 0;
+    gStat.sentPackets = 0;
+    gStat.recvBytes = 0;
     gStat.recvPackets = 0;
     gStat.badPackets = 0;
-    //gStat.timeouts = 0;
+    gStat.dropped = 0;
     for (unsigned i = 0; i < bc::MAX_CHANNEL; i++) {
         gChannelHandler[i] = NULL;
+        gSeq[i] = 0;
     }
 }
 
 void bc::start() {
     openPort(kDeviceName);
     gStopReceiveThread = false;
-    gReceiveThread = boostly::Thread(receiveThreadFn);
+    gReceiveThread.start(receiveThreadFn);
 }
 
 const uint8_t ESC = 0xdb;
@@ -201,7 +204,8 @@ uint8_t bc::send(Buffer &message, unsigned channel, bool wantAck) {
         throw "write() returned wrong length";
     }
 #endif
-    gStat.sendPackets++;
+    gStat.sentBytes += message.mLength;
+    gStat.sentPackets++;
     return gSeq[channel];
 }
 
@@ -233,6 +237,7 @@ static void receiveThreadFn() {
             throw "read() returned an error";
         }
         // err is the number of bytes actually read
+        gStat.recvBytes += err;
         uint8_t *p = readPointer;
         readPointer += err;
         readLength -= err;
@@ -334,10 +339,11 @@ static bc::Buffer *processPacket(bc::Buffer *pMessage) {
     bc::callback_t *handler = NULL;
     if (pMessage->mData[5] < bc::MAX_CHANNEL)
         handler = gChannelHandler[pMessage->mData[5]];
-    // Silently drop packets if we have no handler
     if (handler != NULL) return (*handler)(*pMessage);
 
-    // Hand back the same buffer to re-use for now
+    // Silently drop packets if we have no handler
+    gStat.dropped++;
+    // Hand back the same buffer to re-use
     return pMessage;
 }
 
