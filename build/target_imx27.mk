@@ -9,7 +9,7 @@ AR = $(CROSSTOOL)/arm-none-linux-gnueabi-ar
 
 # The following flags look like the right things, taken from the log of
 # an imx27 build.
-CFLAGS += \
+_BOTH_FLAGS += \
     -pipe \
     -fno-omit-frame-pointer \
     -rdynamic \
@@ -25,5 +25,11 @@ CFLAGS += \
     -DPOSIX
 
 # Added based on my notes http://wiki.net.local/mediawiki/index.php/Steve_fiddling_with_ltib_setup#Architecture_Tangent
-CFLAGS += -mcpu=arm926ej-s
+_BOTH_FLAGS += -mcpu=arm926ej-s
+
+CFLAGS += $(_BOTH_FLAGS)
+CXXFLAGS += $(_BOTH_FLAGS)
+
+LDFLAGS += -L$(RDA_TOP)/../boost-1.48-prebuild-imx27/lib
+CPPFLAGS += -I$(RDA_TOP)/../boost-1.48-prebuild-imx27/include
 
