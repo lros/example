@@ -20,11 +20,30 @@ namespace odt {  // Object Dictionary Transport
 #undef ENUM_VAL
 #undef ENUM_CONSTANT
 
-    // We use the same buffers as the dl, but with additional functions.
-    struct Buffer: dl::Buffer {
-        void addOdPut(OdName odname, int value);
-        void addOdGet(OdName odname);
-    };
+    // Call this after dl::init() and before dl::start().
+    void init();
+
+    // Write multiple OD values.  Blocks waiting for ACK.
+    void putMultiple(OdName *names, uint32_t *values, unsigned n);
+
+    // Write a single OD value.  Blocks waiting for ACK.
+    inline void put(OdName name, uint32_t value) {
+        putMultiple(&name, &value, 1);
+    }
+
+    // Read multiple OD values.  Blocks waiting for response, obviously.
+    // Fills the values into outValues[].
+    void getMultiple(OdName *names, uint32_t *outValues, unsigned n);
+
+    // Read a single OD value.  Blocks.  Returns the value.
+    inline uint32_t get(OdName name) {
+        uint32_t value;
+        getMultiple(&name, &value, 1);
+        return value;
+    }
+
+    // Returns the OD Get command for name
+    uint16_t odGetCommand(OdName name);
 
 }  // end namespace odt
 

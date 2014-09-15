@@ -79,7 +79,7 @@ namespace dl {  // Data Link, layer 2
     // Callback when a packet is received on a channel.
     // Returns pointer to the Buffer for the send thread to use next.
     // (Can be message or can swap and keep message.)
-    typedef Buffer *callback_t(Buffer &message);
+    typedef Buffer *callback_t(Buffer *message);
 
     // Go ahead and increase this up to 16 if needed, the MPIC goes to 16.
     // We currently only use 2 and 3.

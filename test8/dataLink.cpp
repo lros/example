@@ -156,6 +156,10 @@ const uint8_t END = 0xc0;
 const uint8_t ESC_END = 0xdc;
 
 uint8_t dl::send(Buffer &message, unsigned channel, bool wantAck) {
+    // If we were to add another transport, we'd probably want to
+    // add a lock acquisition to this function, to ensure only one
+    // transport (i.e. one thread) sends at a time.  I'm not sure if
+    // we could get away without it.
     if (channel >= dl::MAX_CHANNEL) throw "channel number out of range";
     printData("send(): unmodified content", message.content(),
             message.contentLength());
@@ -339,15 +343,15 @@ static dl::Buffer *processPacket(dl::Buffer *pMessage) {
     dl::callback_t *handler = NULL;
     if (pMessage->mData[5] < dl::MAX_CHANNEL)
         handler = gChannelHandler[pMessage->mData[5]];
-    if (handler != NULL) return (*handler)(*pMessage);
+    if (handler != NULL) return (*handler)(pMessage);
 
-    // Silently drop packets if we have no handler
+    // Silently drop packets if we have no handler (but count them)
     gStat.dropped++;
     // Hand back the same buffer to re-use
     return pMessage;
 }
 
-void registerCallback(dl::callback_t *callback, unsigned channel) {
+void dl::registerCallback(callback_t *callback, unsigned channel) {
     if (channel < dl::MAX_CHANNEL)
         gChannelHandler[channel] = callback;
     else throw "channel number too high";
