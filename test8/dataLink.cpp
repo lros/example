@@ -46,6 +46,13 @@ static void crc16init(void)
         }
         gCrcTable[i] = value;
     }
+#if defined RDA_CONFIG_debug && defined DEBUG_CRC
+    printf("CRC-16 Table:\n");
+    for (unsigned k = 0; k < 256; k++) {
+        printf("%04x ", gCrcTable[k]);
+        if (15 == k & 0xf) printf("\n");
+    }
+#endif
 }
 
 static uint16_t crc16compute(uint8_t *bytes, uint16_t len)
@@ -58,6 +65,14 @@ static uint16_t crc16compute(uint8_t *bytes, uint16_t len)
         index = (uint8_t)(crc ^ bytes[i]);
         crc   = (uint16_t)((crc >> 8) ^ gCrcTable[index]);
     }
+#if defined RDA_CONFIG_debug && defined DEBUG_CRC
+    printf("CRC computation result 0x%04x from:\n", crc);
+    for (unsigned k = 0; k < len; k++) {
+        printf("%02x ", bytes[k]);
+        if (15 == k & 0xf) printf("\n");
+    }
+    if (0 != len & 0xf) printf("\n");
+#endif
     return(crc);
 }
 
@@ -166,9 +181,6 @@ uint8_t dl::send(Buffer &message, unsigned channel, bool wantAck) {
     // Packetize
     unsigned flags = 0;
     if (wantAck) flags |= 0x08;
-    uint16_t crc = crc16compute(message.content(), message.contentLength());
-    message.mData[0] = crc & 0xff;
-    message.mData[1] = crc >> 8;
     message.mData[2] = 1;    // protocol version
     message.mData[3] = message.contentLength() & 0xff;
     message.mData[4] = (flags << 4) | ((message.contentLength() >> 8) & 0x0f);
@@ -176,6 +188,9 @@ uint8_t dl::send(Buffer &message, unsigned channel, bool wantAck) {
     gSeq[channel] += 1;
     if (gSeq[channel] == 0) gSeq[channel] = 1;
     message.mData[6] = gSeq[channel];   // sequence number
+    uint16_t crc = crc16compute(&(message.mData[2]), message.mLength - 2);
+    message.mData[0] = crc & 0xff;
+    message.mData[1] = crc >> 8;
     //printData("send(): packet with header", message.mData, message.mLength);
 
     // Escape
@@ -276,8 +291,8 @@ static void receiveThreadFn() {
 }
 
 static dl::Buffer *processPacket(dl::Buffer *pMessage) {
-    printData("processPacket(): received data", pMessage->mData,
-            pMessage->mLength);
+    //printData("processPacket(): received data", pMessage->mData,
+    //        pMessage->mLength);
 
     // unescape
     unsigned j = 0;  // indexes unescaped data
@@ -311,10 +326,10 @@ static dl::Buffer *processPacket(dl::Buffer *pMessage) {
         return pMessage;
     }
     // j is the length of the unescaped data
-    printData("processPacket(): unescaped data", pMessage->mData, j);
+    //printData("processPacket(): unescaped data", pMessage->mData, j);
 
     // Check the header
-    uint16_t crc = crc16compute(&(pMessage->mData[2]), j);
+    uint16_t crc = crc16compute(&(pMessage->mData[2]), j - 2);
     if ((pMessage->mData[0] + (pMessage->mData[1] << 8)) != crc) {
         // bad CRC
         gStat.badPackets++;

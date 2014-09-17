@@ -30,6 +30,9 @@ _BOTH_FLAGS += -mcpu=arm926ej-s
 CFLAGS += $(_BOTH_FLAGS)
 CXXFLAGS += $(_BOTH_FLAGS)
 
-LDFLAGS += -L$(RDA_TOP)/../boost-1.48-prebuild-imx27/lib
-CPPFLAGS += -I$(RDA_TOP)/../boost-1.48-prebuild-imx27/include
+#LDFLAGS += -L$(RDA_TOP)/../boost-1.48-prebuild-imx27/lib
+#CPPFLAGS += -I$(RDA_TOP)/../boost-1.48-prebuild-imx27/include
+
+LDFLAGS += -L$(RDA_TOP)/../libs/imx27
+CPPFLAGS += -I$(RDA_TOP)/../boost/boost_1_55_0
 

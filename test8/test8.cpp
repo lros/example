@@ -5,6 +5,7 @@
 
 int main() {
     dl::init();
+    odt::init();
     dl::start();
     dl::Buffer message;
     printf("Sizes: int = %zu, long int = %zu, long long int = %zu\n",
@@ -14,10 +15,7 @@ int main() {
         7, 0x80,  // get OD_TIMER (index 7, 4 bytes)
         26, 0xc0,  // get OD_TELEMETRY_MAX (index 26, 2 bytes)
     };
-    for (unsigned i = 0; i < sizeof(content); i++) {
-        // should be bcopy() or something
-        message.content()[i] = content[i];
-    }
+    memcpy(message.content(), content, sizeof(content));
     message.contentLength(sizeof(content));
     uint8_t seq = dl::send(message, 2, false);
     printf("seq is %hhu\n", seq);
@@ -26,6 +24,13 @@ int main() {
         0    // nanoseconds
     };
     nanosleep(&aWhile, NULL);
+    uint32_t values[3];
+    odt::OdName names[] = {
+        odt::OD_VERSION,
+        odt::OD_TIMER,
+        odt::OD_TELEMETRY_MAX,
+    };
+    odt::getMultiple(names, values, 3);
     dl::finish();
     dl::Statistics stat;
     dl::statistics(stat);

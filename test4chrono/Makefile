@@ -2,7 +2,7 @@
 
 SOURCES := test4.cpp
 #LDLIBS += -lboost_date_time -lboost_thread
-LDLIBS += -lboost_chrono -lboost_thread -lboost_system
+LDLIBS += -lboost_chrono -lboost_thread -lboost_system -lpthread -lrt
 
 # Bypass rdainfo.py
 _HOST := linux
