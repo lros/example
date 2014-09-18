@@ -342,8 +342,9 @@ static dl::Buffer *processPacket(dl::Buffer *pMessage) {
         printf("bad protocol number\n");
         return pMessage;
     }
-    pMessage->mLength = pMessage->mData[3] + ((pMessage->mData[4] & 0x0f) << 8);
-    if (pMessage->mLength + dl::Buffer::HEADER != j) {
+    pMessage->contentLength(pMessage->mData[3]
+            + ((pMessage->mData[4] & 0x0f) << 8));
+    if (pMessage->mLength != j) {
         // bad packet content length
         gStat.badPackets++;
         printf("bad packet length\n");
@@ -380,7 +381,7 @@ void dl::finish() {
 #endif
 }
 
-void dl::statistics(Statistics &stat) {
+void dl::getStatistics(Statistics &stat) {
     stat = gStat;
 }
 

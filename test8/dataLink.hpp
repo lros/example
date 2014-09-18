@@ -107,7 +107,7 @@ namespace dl {  // Data Link, layer 2
     // Currently there is no guard so the data could be corrupt.
     // Feel free to read it twice and see if it looks reasonable.
     // Or, call this after finish().
-    void statistics(Statistics &stat);
+    void getStatistics(Statistics &stat);
 
 }  // end namespace dl
 

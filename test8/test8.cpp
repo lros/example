@@ -1,7 +1,12 @@
 #include "odTransport.hpp"
+#include "dataLink.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+
+float fixpoint32_16(uint32_t value) {
+    return ((float) value) / 0x10000;
+}
 
 int main() {
     dl::init();
@@ -24,22 +29,60 @@ int main() {
         0    // nanoseconds
     };
     nanosleep(&aWhile, NULL);
-    uint32_t values[3];
+    uint32_t values[10];
     odt::OdName names[] = {
         odt::OD_VERSION,
         odt::OD_TIMER,
         odt::OD_TELEMETRY_MAX,
     };
-    odt::getMultiple(names, values, 3);
+    if (odt::getMultiple(names, values, 3)) {
+        printf("Error return from getMultiple()\n");
+    } else {
+        printf("OD_VERSION is %u\n", values[0]);
+        printf("OD_TIMER is %u\n", values[1]);
+        printf("OD_TELEMETRY_MAX is %u\n", values[2]);
+    }
+    odt::OdName caps[] = {
+        odt::OD_CAPS_WHEEL_BASE,
+        odt::OD_CAPS_WHEEL_RADIUS,
+        odt::OD_CAPS_ENCODER_COUNTS,
+        odt::OD_CAPS_GEAR_RATIO,
+        odt::OD_CAPS_PI_SAMPLING_INTERVAL,
+        odt::OD_CAPS_TELEMETRY_COUNTER_INTERVAL,
+    };
+    if (odt::getMultiple(caps, values, 6)) {
+        printf("Error return from getMultiple()\n");
+    } else {
+        printf("OD_CAPS_WHEEL_BASE is %f\n", fixpoint32_16(values[0]));
+        printf("OD_CAPS_WHEEL_RADIUS is %f\n", fixpoint32_16(values[1]));
+        printf("OD_CAPS_ENCODER_COUNTS is %u\n", values[2]);
+        printf("OD_CAPS_GEAR_RATIO is %f\n", fixpoint32_16(values[3]));
+        printf("OD_CAPS_PI_SAMPLING_INTERVAL is %u\n", values[4]);
+        printf("OD_CAPS_TELEMETRY_COUNTER_INTERVAL is %u\n", values[5]);
+    }
+    // Try writing the EEPROM although we haven't changed anything.
+    if (odt::stopTelemetry()) {
+        printf("Failure to turn off telemetry.\n");
+    } else {
+        unsigned err = odt::eeWrite();
+        printf("eeWrite() returns %u\n", err);
+        printf("OD_EEPROM_ERROR is 0x%04x\n", odt::get(odt::OD_EEPROM_ERROR));
+    }
+    nanosleep(&aWhile, NULL);
     dl::finish();
-    dl::Statistics stat;
-    dl::statistics(stat);
-    printf("%llu bytes sent.\n", stat.sentBytes);
-    printf("%llu packets sent.\n", stat.sentPackets);
-    printf("%llu bytes received.\n", stat.recvBytes);
-    printf("%llu good packets received.\n", stat.recvPackets);
-    printf("%llu bad packets received.\n", stat.badPackets);
-    printf("%llu good packets dropped.\n", stat.dropped);
+    dl::Statistics dlStat;
+    dl::getStatistics(dlStat);
+    printf("%llu bytes sent.\n", dlStat.sentBytes);
+    printf("%llu packets sent.\n", dlStat.sentPackets);
+    printf("%llu bytes received.\n", dlStat.recvBytes);
+    printf("%llu good packets received.\n", dlStat.recvPackets);
+    printf("%llu bad packets received.\n", dlStat.badPackets);
+    printf("%llu good packets dropped.\n", dlStat.dropped);
+    odt::Statistics odtStat;
+    odt::getStatistics(odtStat);
+    printf("%llu unexpected sequence numbers.\n", odtStat.badSequence);
+    printf("%llu unexpected packet lengths.\n", odtStat.badLength);
+    printf("%llu response timeouts.\n", odtStat.timeout);
     return 0;
 }
 
