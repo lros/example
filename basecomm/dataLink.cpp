@@ -1,6 +1,7 @@
 #include "dataLink.hpp"
-#include "boostly.hpp"
 
+//#include <boost/chrono.hpp>
+#include <boost/thread.hpp>
 #include <termios.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -8,11 +9,14 @@
 #include <string.h>
 
 #if defined RDA_CONFIG_debug
-#include <stdio.h>
+    #include <stdio.h>
+#else
+    #undef DEBUG_CRC
+    #undef DEBUG_DATA
 #endif
 
 static const char *kDeviceName = "/dev/ttymxc1";
-static boostly::Thread gReceiveThread;
+static boost::thread gReceiveThread;
 static bool gStopReceiveThread;
 static dl::callback_t *gChannelHandler[dl::MAX_CHANNEL];
 static uint8_t gSeq[dl::MAX_CHANNEL];
@@ -46,13 +50,13 @@ static void crc16init(void)
         }
         gCrcTable[i] = value;
     }
-#if defined RDA_CONFIG_debug && defined DEBUG_CRC
-    printf("CRC-16 Table:\n");
-    for (unsigned k = 0; k < 256; k++) {
-        printf("%04x ", gCrcTable[k]);
-        if (15 == k & 0xf) printf("\n");
-    }
-#endif
+    #if defined DEBUG_CRC
+        printf("CRC-16 Table:\n");
+        for (unsigned k = 0; k < 256; k++) {
+            printf("%04x ", gCrcTable[k]);
+            if (15 == k & 0xf) printf("\n");
+        }
+    #endif
 }
 
 static uint16_t crc16compute(uint8_t *bytes, uint16_t len)
@@ -65,81 +69,62 @@ static uint16_t crc16compute(uint8_t *bytes, uint16_t len)
         index = (uint8_t)(crc ^ bytes[i]);
         crc   = (uint16_t)((crc >> 8) ^ gCrcTable[index]);
     }
-#if defined RDA_CONFIG_debug && defined DEBUG_CRC
-    printf("CRC computation result 0x%04x from:\n", crc);
-    for (unsigned k = 0; k < len; k++) {
-        printf("%02x ", bytes[k]);
-        if (15 == k & 0xf) printf("\n");
-    }
-    if (0 != len & 0xf) printf("\n");
-#endif
+    #if defined DEBUG_CRC
+        printf("CRC computation result 0x%04x from:\n", crc);
+        for (unsigned k = 0; k < len; k++) {
+            printf("%02x ", bytes[k]);
+            if (15 == k & 0xf) printf("\n");
+        }
+        if (0 != len & 0xf) printf("\n");
+    #endif
     return(crc);
 }
 
 static int gPortFd = -1;
 
 static void openPort(const char *deviceName) {
-#if defined RDA_TARGET_imx27
-    struct termios tio;
+    #if defined RDA_TARGET_imx27
+        struct termios tio;
 
-    int fd = open(deviceName, O_RDWR | O_NOCTTY);
-    if(fd < 0) {
-        gPortFd = -1;
-        throw strerror(errno);
-    }
+        int fd = open(deviceName, O_RDWR | O_NOCTTY);
+        if(fd < 0) {
+            gPortFd = -1;
+            throw strerror(errno);
+        }
 
-    tcgetattr(fd, &tio);  // Is this necessary?
+        tcgetattr(fd, &tio);  // Is this necessary?
 
-    tio.c_cflag = CS8 | CLOCAL | CREAD;
-    tio.c_iflag = IGNPAR;
-    tio.c_oflag = 0;
-    tio.c_lflag = 0;
-#if 1
-    for (unsigned i = 0; i < NCCS; i++) {
-        tio.c_cc[i] = _POSIX_VDISABLE;
-    }
-#else
-    tio.c_cc[VINTR]    = 0;
-    tio.c_cc[VQUIT]    = 0;
-    tio.c_cc[VERASE]   = 0;
-    tio.c_cc[VKILL]    = 0;
-    tio.c_cc[VEOF]     = 0;
-    tio.c_cc[VTIME]    = 0;
-    tio.c_cc[VMIN]     = 0;
-    tio.c_cc[VSWTC]    = 0;
-    tio.c_cc[VSTART]   = 0;
-    tio.c_cc[VSTOP]    = 0;
-    tio.c_cc[VSUSP]    = 0;
-    tio.c_cc[VEOL]     = 0;
-    tio.c_cc[VREPRINT] = 0;
-    tio.c_cc[VDISCARD] = 0;
-    tio.c_cc[VWERASE]  = 0;
-    tio.c_cc[VLNEXT]   = 0;
-    tio.c_cc[VEOL2]    = 0;
-#endif
-    cfsetispeed(&tio, B115200);
-    cfsetospeed(&tio, B115200);
+        tio.c_cflag = CS8 | CLOCAL | CREAD;
+        tio.c_iflag = IGNPAR;
+        tio.c_oflag = 0;
+        tio.c_lflag = 0;
+        for (unsigned i = 0; i < NCCS; i++) {
+            tio.c_cc[i] = _POSIX_VDISABLE;
+        }
+        cfsetispeed(&tio, B115200);
+        cfsetospeed(&tio, B115200);
 
-    tcflush(fd, TCIOFLUSH);
-    tcsetattr(fd, TCSANOW, &tio);
+        tcflush(fd, TCIOFLUSH);
+        tcsetattr(fd, TCSANOW, &tio);
 
-    gPortFd = fd;
-#elif defined RDA_TARGET_linux
-    gPortFd = 1;
-#else
-#error Unknown RDA_TARGET.
-#endif
+        gPortFd = fd;
+    #elif defined RDA_TARGET_linux
+        gPortFd = 1;
+    #else
+        #error Unknown RDA_TARGET.
+    #endif
 }
 
-#if defined RDA_CONFIG_debug
-static void printData(const char *message, uint8_t *start, unsigned length) {
-    printf("%s\n", message);
-    for (unsigned i = 0; i < length; i++)
-        printf("%02x ", start[i]);
-    printf("\n");
-}
+#if defined DEBUG_DATA
+    static void printData(const char *message, uint8_t *start,
+            unsigned length) {
+        printf("%s\n", message);
+        for (unsigned i = 0; i < length; i++)
+            printf("%02x ", start[i]);
+        printf("\n");
+    }
 #else
-#define printData(x, y, z) do { } while (0)
+    #define printData(x, y, z) do { } while (0)
 #endif
 
 // forward declaration
@@ -162,7 +147,7 @@ void dl::init() {
 void dl::start() {
     openPort(kDeviceName);
     gStopReceiveThread = false;
-    gReceiveThread.start(receiveThreadFn);
+    gReceiveThread = boost::thread(receiveThreadFn);
 }
 
 const uint8_t ESC = 0xdb;
@@ -191,7 +176,7 @@ uint8_t dl::send(Buffer &message, unsigned channel, bool wantAck) {
     uint16_t crc = crc16compute(&(message.mData[2]), message.mLength - 2);
     message.mData[0] = crc & 0xff;
     message.mData[1] = crc >> 8;
-    //printData("send(): packet with header", message.mData, message.mLength);
+    printData("send(): packet with header", message.mData, message.mLength);
 
     // Escape
     unsigned nEscapes = 0;
@@ -216,13 +201,13 @@ uint8_t dl::send(Buffer &message, unsigned channel, bool wantAck) {
     // Add END and send
     message.mLength += nEscapes;
     message.mData[message.mLength++] = END;
-    //printData("send(): escaped packet", message.mData, message.mLength);
-#if defined RDA_TARGET_imx27
-    int n = write(gPortFd, message.mData, message.mLength);
-    if (n != (int) message.mLength) {
-        throw "write() returned wrong length";
-    }
-#endif
+    printData("send(): escaped packet", message.mData, message.mLength);
+    #if defined RDA_TARGET_imx27
+        int n = write(gPortFd, message.mData, message.mLength);
+        if (n != (int) message.mLength) {
+            throw "write() returned wrong length";
+        }
+    #endif
     gStat.sentBytes += message.mLength;
     gStat.sentPackets++;
     return gSeq[channel];
@@ -285,14 +270,14 @@ static void receiveThreadFn() {
             throw "Full buffer but no end of packet.";
         }
     }
-#if defined RDA_CONFIG_debug
-    printf("receiveThreadFn(): normal end\n");
-#endif
+    #if defined RDA_CONFIG_debug
+        printf("receiveThreadFn(): normal end\n");
+    #endif
 }
 
 static dl::Buffer *processPacket(dl::Buffer *pMessage) {
-    //printData("processPacket(): received data", pMessage->mData,
-    //        pMessage->mLength);
+    printData("processPacket(): received data", pMessage->mData,
+            pMessage->mLength);
 
     // unescape
     unsigned j = 0;  // indexes unescaped data
@@ -376,9 +361,9 @@ void dl::registerCallback(callback_t *callback, unsigned channel) {
 void dl::finish() {
     gStopReceiveThread = true;
     gReceiveThread.join();
-#if defined RDA_TARGET_imx27
-    if (gPortFd != -1) close(gPortFd);
-#endif
+    #if defined RDA_TARGET_imx27
+        if (gPortFd != -1) close(gPortFd);
+    #endif
 }
 
 void dl::getStatistics(Statistics &stat) {

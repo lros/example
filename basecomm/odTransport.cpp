@@ -1,7 +1,14 @@
 #include "odTransport.hpp"
 #include "dataLink.hpp"
-#include "boostly.hpp"
-#include <stdio.h>
+#include <boost/chrono.hpp>
+#include <boost/thread.hpp>
+
+#if defined RDA_CONFIG_debug
+    #include <stdio.h>
+#else
+    #undef DEBUG_DATA
+    #undef DEBUG_EEPROM
+#endif
 
 // Get OD entry sizes
 
@@ -17,28 +24,42 @@ uint8_t odSize[] = {
 #undef ENUM_VAL
 #undef ENUM_CONSTANT
 
+#if defined DEBUG_DATA
+    #define errPrint(...) fprintf(stderr, __VA_ARGS__)
+#else
+    #define errPrint(...) do { } while (0)
+#endif
+
+// Sorry, I have trouble with these verbose Boost type names.
+typedef boost::mutex boostMutex;
+typedef boost::condition_variable boostEvent;
+typedef boost::lock_guard<boost::mutex> boostGuard;
+// You need to hold a WaitGuard in order to wait on an Event.
+typedef boost::unique_lock<boost::mutex> boostWaitGuard;
+typedef boost::chrono::steady_clock::time_point boostAbsTime;
+
 // Hold this lock for the duration of a send - response.
 // E.g. we don't want to send a second request in the middle of retrying.
 // If we add more transports, this mutex should be shared by them all.
 // Only one transaction at a time regardless of the transport.
 // The MPIC isn't implemented to do multiple things at once.
 // So, come to think of it, this mutex may belong in the Data Link layer.
-boostly::Mutex gTransportMutex;
+boostMutex gTransportMutex;
 
 // We have to provide one buffer so we can hold on to the responses
 // after the responseCallback returns.
 static dl::Buffer ourResponseBuffer;
 
 // Use this mutex for accessing gotResponse and pResponseBuffer
-boostly::Mutex gResponseMutex;
+boostMutex gResponseMutex;
 bool gGotResponse;
 static dl::Buffer *gpResponseBuffer;
 // Signal from receive thread to whoever sent a packet,
-// the response is come.
-boostly::Condition gResponseSignal;
+// that the response is come.
+boostEvent gResponseEvent;
 
 // Mutex for accessing telemetry related data
-boostly::Mutex gTelemetryMutex;
+boostMutex gTelemetryMutex;
 // Telemetry names, values, number of items
 odt::OdName *gTelemetryNames;
 uint32_t *gTelemetryValues;
@@ -99,27 +120,29 @@ bool odt::getMultiple(OdName *names, uint32_t *outValues, unsigned n) {
 // Note that names and outValues are what we expect to get in the response.
 static bool sendReceive(dl::Buffer &buf, odt::OdName *names, uint32_t
         *outValues, unsigned n) {
-    boostly::Guard guard(gTransportMutex);
-    // discard any pending response TODO is this the right place?
-    // TODO Shouldn't we grab gResponseMutex?
-    gGotResponse = false;
+    boostGuard transportGuard(gTransportMutex);
+    {
+        // discard any pending response (shouldn't happen)
+        boostGuard responseGuard(gResponseMutex);
+        gGotResponse = false;
+    }
     // If we're not getting any values back then we want an ACK.
     uint8_t seq = dl::send(buf, dl::COMMAND_CHANNEL, n == 0);
     // wait for response and parse it
     bool timedOut = false;
     while (!timedOut) {
-        boostly::Time deadline;
-        deadline.setToNow();
-        deadline.addSeconds(1);
-        boostly::Guard responseGuard(gResponseMutex);
+        boostAbsTime deadline = boost::chrono::steady_clock::now()
+            + boost::chrono::milliseconds(100);
+        boostWaitGuard responseGuard(gResponseMutex);
         while (!gGotResponse && !timedOut) {
-            timedOut = gResponseSignal.timed_wait(responseGuard, deadline);
+            timedOut = gResponseEvent.wait_until(responseGuard, deadline);
         }
         if (gGotResponse) {
+            gGotResponse = false;
             return parseValues(seq, gpResponseBuffer, names, outValues, n);
         }
     }
-    printf("Base response timeout.\n");
+    errPrint("Base response timeout.\n");
     gStat.timeout++;
     return true;
 }
@@ -127,7 +150,8 @@ static bool sendReceive(dl::Buffer &buf, odt::OdName *names, uint32_t
 static bool parseValues(uint8_t seq, dl::Buffer *pBuf, odt::OdName *names,
         uint32_t *outValues, unsigned n) {
     if (seq != pBuf->sequence()) {
-        printf("Bad sequence number %u (expected %u)\n", pBuf->sequence(), seq);
+        errPrint("Bad sequence number %u (expected %u)\n",
+                pBuf->sequence(), seq);
         gStat.badSequence++;
         return true;
     }
@@ -136,16 +160,18 @@ static bool parseValues(uint8_t seq, dl::Buffer *pBuf, odt::OdName *names,
         expectedLength += odSize[names[i]];
     }
     if (expectedLength != pBuf->contentLength()) {
-        printf("Bad response length %u (expected %u)\n",
+        errPrint("Bad response length %u (expected %u)\n",
                 pBuf->contentLength(), expectedLength);
         gStat.badLength++;
         return true;
     }
-    printf("parseValues(): raw content is");
-    for (unsigned i = 0; i < pBuf->contentLength(); i++) {
-        printf(" %02x", pBuf->content()[i]);
-    }
-    printf("\n");
+    #if defined DEBUG_DATA
+        printf("parseValues(): raw content is");
+        for (unsigned i = 0; i < pBuf->contentLength(); i++) {
+            printf(" %02x", pBuf->content()[i]);
+        }
+        printf("\n");
+    #endif
     // We could also check if n == 0 then pBuf->flagIsAck() should be true.
     uint8_t *p = pBuf->content();
     for (unsigned i = 0; i < n; i++) {
@@ -160,12 +186,11 @@ static bool parseValues(uint8_t seq, dl::Buffer *pBuf, odt::OdName *names,
 }
 
 static dl::Buffer *responseCallback(dl::Buffer *message) {
-    boostly::Guard responseGuard(gResponseMutex);
+    boostGuard responseGuard(gResponseMutex);
     gGotResponse = true;
     dl::Buffer *tmp = gpResponseBuffer;
     gpResponseBuffer = message;
-    printf("Got a response packet.\n");
-    gResponseSignal.notify();
+    gResponseEvent.notify_one();
     return tmp;
 }
 
@@ -182,25 +207,35 @@ uint16_t odt::odGetCommand(OdName name) {
 // Access EEPROM
 //
 
+#if defined DEBUG_EEPROM
+    #define GETTIME(ts, err) \
+        if (clock_gettime(CLOCK_REALTIME, &ts)) return err
+
+    static float delta(timespec &t2, timespec &t1) {
+        float result = (t2.tv_nsec - t1.tv_nsec) * 0.000000001;
+        result += t2.tv_sec - t1.tv_sec;
+        return result;
+    }
+#else
+    #define GETTIME(ts, err) do { } while (0)
+#endif
+
 // Write the contents of EEPROM staging to the actual EEPROM.
 // Returns error codes from OD_EEPROM_ERROR, 0 == OK.
 // Caller waits several seconds.
 unsigned odt::eeWrite() {
-    bool berr = put(OD_EEPROM_ERROR, 0);
-    if (berr) return 100;
+    #if defined DEBUG_EEPROM
+        struct timespec ts1, ts2, ts3, ts4, ts5, ts6, ts7;
+    #endif
+    if (put(OD_EEPROM_ERROR, 0)) return 100;
     struct timespec tenthSecond = {
         0,   // seconds
-        10 * 1000 * 1000  // nanoseconds
+        100 * 1000 * 1000  // nanoseconds
     };
     // Stage 1
-    struct timespec ts1;
-    int ierr = clock_gettime(CLOCK_REALTIME, &ts1);
-    if (ierr) return 101;
-    berr = put(OD_EEPROM_CTRL, 0xaa05);
-    if (berr) return 102;
-    struct timespec ts2;
-    ierr = clock_gettime(CLOCK_REALTIME, &ts2);
-    if (ierr) return 103;
+    GETTIME(ts1, 101);
+    if (put(OD_EEPROM_CTRL, 0xaa05)) return 102;
+    GETTIME(ts2, 103);
     unsigned count = 0;
     while (1) {
         if (0 == get(OD_EEPROM_CTRL)) break;
@@ -210,14 +245,9 @@ unsigned odt::eeWrite() {
     }
 
     // Stage 2
-    struct timespec ts3;
-    ierr = clock_gettime(CLOCK_REALTIME, &ts3);
-    if (ierr) return 105;
-    berr = put(OD_EEPROM_CTRL, 0x505a);
-    if (berr) return 106;
-    struct timespec ts4;
-    ierr = clock_gettime(CLOCK_REALTIME, &ts4);
-    if (ierr) return 107;
+    GETTIME(ts3, 105);
+    if (put(OD_EEPROM_CTRL, 0x505a)) return 106;
+    GETTIME(ts4, 107);
     count = 0;
     while (1) {
         if (0 == get(OD_EEPROM_CTRL)) break;
@@ -227,14 +257,9 @@ unsigned odt::eeWrite() {
     }
 
     // Stage 3
-    struct timespec ts5;
-    ierr = clock_gettime(CLOCK_REALTIME, &ts5);
-    if (ierr) return 109;
-    berr = put(OD_EEPROM_CTRL, 0xc5a0);
-    if (berr) return 110;
-    struct timespec ts6;
-    ierr = clock_gettime(CLOCK_REALTIME, &ts6);
-    if (ierr) return 111;
+    GETTIME(ts5, 109);
+    if (put(OD_EEPROM_CTRL, 0xc5a0)) return 110;
+    GETTIME(ts6, 111);
     struct timespec oneSecond = { 1, 0 };
     nanosleep(&oneSecond, NULL);
     count = 0;
@@ -244,37 +269,25 @@ unsigned odt::eeWrite() {
         nanosleep(&tenthSecond, NULL);
         count++;
     }
-    struct timespec ts7;
-    ierr = clock_gettime(CLOCK_REALTIME, &ts7);
-    if (ierr) return 113;
+    GETTIME(ts7, 113);
 
     // Wrap it up
     unsigned eeprom_err = get(OD_EEPROM_ERROR);
     if (0 == eeprom_err) {
-        nanosleep(&oneSecond, NULL);
-        put(OD_EEPROM_CTRL, 0x1234);   // force dictionary to repopulate
+        // get dictionary to repopulate from eeprom
+        nanosleep(&tenthSecond, NULL);
+        put(OD_EEPROM_CTRL, 0x1234);
         nanosleep(&oneSecond, NULL);
         nanosleep(&oneSecond, NULL);
     }
-    float delta;
-    delta = (ts2.tv_nsec - ts1.tv_nsec) * 0.000000001;
-    delta += ts2.tv_sec - ts1.tv_sec;
-    printf("Write first command: %f\n", delta);
-    delta = (ts3.tv_nsec - ts2.tv_nsec) * 0.000000001;
-    delta += ts3.tv_sec - ts2.tv_sec;
-    printf("Pause: %f\n", delta);
-    delta = (ts4.tv_nsec - ts3.tv_nsec) * 0.000000001;
-    delta += ts4.tv_sec - ts3.tv_sec;
-    printf("Write second command: %f\n", delta);
-    delta = (ts5.tv_nsec - ts4.tv_nsec) * 0.000000001;
-    delta += ts5.tv_sec - ts4.tv_sec;
-    printf("Pause: %f\n", delta);
-    delta = (ts6.tv_nsec - ts5.tv_nsec) * 0.000000001;
-    delta += ts6.tv_sec - ts5.tv_sec;
-    printf("Write third command: %f\n", delta);
-    delta = (ts7.tv_nsec - ts6.tv_nsec) * 0.000000001;
-    delta += ts7.tv_sec - ts6.tv_sec;
-    printf("Final pause: %f\n", delta);
+    #if defined DEBUG_EEPROM
+        printf("Write first command: %f\n", delta(ts2, ts1));
+        printf("Response: %f\n", delta(ts3, ts2));
+        printf("Write second command: %f\n", delta(ts4, ts3));
+        printf("Response: %f\n", delta(ts5, ts4));
+        printf("Write third command: %f\n", delta(ts6, ts5));
+        printf("Response: %f\n", delta(ts7, ts6));
+    #endif
     return eeprom_err;
 }
 
@@ -292,19 +305,19 @@ bool odt::setUpTelemetry(OdName *names, uint32_t *outValues, unsigned n,
         unsigned interval, TelemetryCallback *callback) {
     bool err = stopTelemetry();
     if (err) {
-        printf("setUpTelemetry(): Failed to stop telemetry.\n");
+        errPrint("setUpTelemetry(): Failed to stop telemetry.\n");
         return true;
     }
     uint32_t max = get(OD_TELEMETRY_MAX);
     if (max == 0xffff) {
-        printf("setUpTelemetry(): Failed to get TELEMETRY_MAX.\n");
+        errPrint("setUpTelemetry(): Failed to get TELEMETRY_MAX.\n");
         return true;
     }
     if (n > max) {
-        printf("setUpTelemetry(): Too many telemetry entries.\n");
+        errPrint("setUpTelemetry(): Too many telemetry entries.\n");
         return true;
     }
-    boostly::Guard guard(gTelemetryMutex);
+    boostGuard guard(gTelemetryMutex);
     // TODO implement
     return true;  // as long as it's incomplete
 }

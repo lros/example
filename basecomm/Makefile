@@ -2,7 +2,7 @@
 
 UBUNTU_MAJOR := $(firstword $(subst ., ,$(word 2,$(shell lsb_release -r))))
 
-SOURCES := dataLink.cpp odTransport.cpp boostly.cpp
+SOURCES := dataLink.cpp odTransport.cpp
 
 TESTS := setMotorType.cpp
 
@@ -20,4 +20,6 @@ RDA_TOP := ..
 include $(RDA_TOP)/build.mk
 
 all: $(RDA_LIB_STATIC)
+
+$(_OBJDIR)/odTransport.o: CPPFLAGS += -DDEBUG_EEPROM
 
