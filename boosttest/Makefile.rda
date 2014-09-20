@@ -1,0 +1,32 @@
+# RDA-style makefile
+
+SOURCES := timed_wait_test.cpp
+DEFINES += BOOST_TEST_DYN_LINK
+LDLIBS += -lpthread
+
+# Bypass rdainfo.py
+_HOST := linux
+
+RELEASE := $(word 2,$(subst ., ,$(shell lsb_release -r)))
+
+RDA_TOP := ..
+include $(RDA_TOP)/build.mk
+
+all: $(RDA_EXEC)
+
+ifeq ($(TARGET),imx27)
+
+LDLIBS += ../../boost-1.48-prebuild-imx27/lib/libboost_thread-gcc41-mt-1_48.a
+LDLIBS += ../../boost-1.48-prebuild-imx27/lib/libboost_date_time-gcc41-mt-1_48.a
+LDLIBS += ../../boost-1.48-prebuild-imx27/lib/libboost_system-gcc41-mt-1_48.a
+
+else
+
+LDLIBS += -lboost_date_time -lboost_thread -lboost_unit_test_framework
+
+ifeq ($(RELEASE),14)
+LDLIBS += -lboost_system
+endif
+
+endif
+
