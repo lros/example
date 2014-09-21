@@ -1,5 +1,6 @@
 //#include "odTransport.hpp"
 #include <stdint.h>
+#include <stdio.h>
 
 namespace odt {  // Object Dictionary Transport
 
@@ -244,5 +245,12 @@ void init() {
 
 int main() {
     init();
+    printf("      v6       v7\n");
+    for (unsigned i = 0; i < odt::NUM_OD_ENTRIES; i++) {
+        printf("%3i:  %3u %2x   %3u %2x\n", i,
+            od_v6_table[i], od_v6_size[i],
+            od_v7_table[i], od_v7_size[i]);
+        if (od_v6_size[i] != od_v7_size[i]) printf("size matters!\n");
+    }
 }
 

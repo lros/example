@@ -9,7 +9,7 @@ TESTS := setMotorType.cpp
 #DEFINES += DEBUG_CRC
 
 LDLIBS += -lboost_chrono -lboost_thread -lpthread -lrt
-ifeq ($(UBUNTU_MAJOR),14)
+ifeq ($(UBUNTU_MAJOR),12)
 LDLIBS += -lboost_system
 endif
 

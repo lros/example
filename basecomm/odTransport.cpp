@@ -10,19 +10,45 @@
     #undef DEBUG_EEPROM
 #endif
 
-// Get OD entry sizes
+static uint16_t od_v6_map[odt::NUM_OD_ENTRIES];
+static uint8_t od_v6_size[odt::NUM_OD_ENTRIES];
 
-#define ENUM_VAL0(name, size) size
-#define ENUM_VAL(name, size) size
-#define ENUM_CONSTANT(name, value) 0
+static uint16_t od_v7_map[odt::NUM_OD_ENTRIES];
+static uint8_t od_v7_size[odt::NUM_OD_ENTRIES];
 
-uint8_t odSize[] = {
-#include "od_vals.h"
-};
+static void initTables() {
+    unsigned i;
+    for (i = 0; i < odt::NUM_OD_ENTRIES; i++) {
+        od_v6_map[i] = 0xffff;
+        od_v6_size[i] = 0xff;
+        od_v7_map[i] = 0xffff;
+        od_v7_size[i] = 0xff;
+    }
 
-#undef ENUM_VAL0
-#undef ENUM_VAL
-#undef ENUM_CONSTANT
+    // Slurp in the Object Dictionary version 6:
+    #define ENUM_VAL0(name, size) \
+            i = 0; od_v6_map[odt::name] = i; od_v6_size[odt::name] = size
+    #define ENUM_VAL(name, size) \
+            i++; od_v6_map[odt::name] = i; od_v6_size[odt::name] = size
+    #define ENUM_CONSTANT(name, value) 0
+    #include "od_vals_v6.h"
+    #undef ENUM_VAL0
+    #undef ENUM_VAL
+    #undef ENUM_CONSTANT
+    ;  // The stuff above ends without a semicolon.
+
+    // Slurp in the Object Dictionary version 7:
+    #define ENUM_VAL0(name, size) \
+            i = 0; od_v7_map[odt::name] = i; od_v7_size[odt::name] = size
+    #define ENUM_VAL(name, size) \
+            i++; od_v7_map[odt::name] = i; od_v7_size[odt::name] = size
+    #define ENUM_CONSTANT(name, value) 0
+    #include "od_vals_v7.h"
+    #undef ENUM_VAL0
+    #undef ENUM_VAL
+    #undef ENUM_CONSTANT
+    ;  // The stuff above ends without a semicolon.
+}
 
 #if defined DEBUG_DATA
     #define errPrint(...) fprintf(stderr, __VA_ARGS__)
@@ -30,7 +56,13 @@ uint8_t odSize[] = {
     #define errPrint(...) do { } while (0)
 #endif
 
+// These point to tables for the MPIC's current version.
+// Set by setOdVersion().
+static uint16_t *odIndex;
+static uint8_t *odSize;
+
 // Sorry, I have trouble with these verbose Boost type names.
+// Also I find the term "Condition Variable" to be meaningless.
 typedef boost::mutex boostMutex;
 typedef boost::condition_variable boostEvent;
 typedef boost::lock_guard<boost::mutex> boostGuard;
@@ -76,8 +108,10 @@ static bool sendReceive(dl::Buffer &buf, odt::OdName *names,
         uint32_t *outValues, unsigned n);
 static bool parseValues(uint8_t seq, dl::Buffer *pBuf, odt::OdName *names,
         uint32_t *outValues, unsigned n);
+static uint16_t odGetCommand(odt::OdName name);
 
 void odt::init() {
+    initTables();
     gpResponseBuffer = &ourResponseBuffer;
     gGotResponse = false;
     dl::registerCallback(responseCallback, dl::COMMAND_CHANNEL);
@@ -85,6 +119,29 @@ void odt::init() {
     gStat.badSequence = 0;
     gStat.badLength = 0;
     gStat.timeout = 0;
+}
+
+bool odt::setOdVersion() {
+    // In all OD versions, OD_VERSION is the same so pick a version.
+    odIndex = od_v6_map;
+    odSize = od_v6_size;
+    unsigned version = get(OD_VERSION);
+    if (version == 0xffff) return true;
+    switch (version) {
+        case 6:
+            odIndex = od_v6_map;
+            odSize = od_v6_size;
+            printf("Using version 6 object dictionary.\n");
+            break;
+        case 7:
+            odIndex = od_v7_map;
+            odSize = od_v7_size;
+            printf("Using version 7 object dictionary.\n");
+            break;
+        default:
+            return true;
+    }
+    return false;
 }
 
 //
@@ -95,7 +152,7 @@ bool odt::putMultiple(OdName *names, uint32_t *values, unsigned n) {
     dl::Buffer request;
     request.contentLength(0);
     for (unsigned i = 0; i < n; i++) {
-        uint16_t putCmd = names[i];
+        uint16_t putCmd = odIndex[names[i]];
         putCmd |= (odSize[names[i]] == 2 ? 0x4000 : 0x0000);
         request.add16(putCmd);
         if (odSize[names[i]] == 2) {
@@ -194,8 +251,8 @@ static dl::Buffer *responseCallback(dl::Buffer *message) {
     return tmp;
 }
 
-uint16_t odt::odGetCommand(OdName name) {
-    uint16_t cmd = name;
+static uint16_t odGetCommand(odt::OdName name) {
+    uint16_t cmd = odIndex[name];
     if (odSize[name] == 2)
         cmd |= 0xc000;
     else
@@ -323,6 +380,8 @@ bool odt::setUpTelemetry(OdName *names, uint32_t *outValues, unsigned n,
 }
 
 bool odt::stopTelemetry() {
+    // Doesn't need to grab gTelemetryMutex unless the client code is
+    // ridiculous.
     return put(OD_TELEMETRY_INTERVAL, 0);
 }
 

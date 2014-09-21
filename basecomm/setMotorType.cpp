@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
     dl::init();
     odt::init();
     dl::start();
-    printf("OD_VERSION is %u\n", odt::get(odt::OD_VERSION));
+    odt::setOdVersion();
 
     if (odt::put(odt::OD_EEPROM_ERROR, 0))
         fail("Failed to reset EEPROM_ERROR.");
