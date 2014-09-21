@@ -4,7 +4,7 @@ UBUNTU_MAJOR := $(firstword $(subst ., ,$(word 2,$(shell lsb_release -r))))
 
 SOURCES := dataLink.cpp odTransport.cpp
 
-TESTS := setMotorType.cpp
+TESTS := setMotorType.cpp exercise.cpp
 
 #DEFINES += DEBUG_CRC
 
