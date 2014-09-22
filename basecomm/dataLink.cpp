@@ -51,10 +51,10 @@ static void crc16init(void)
         gCrcTable[i] = value;
     }
     #if defined DEBUG_CRC
-        printf("CRC-16 Table:\n");
+        fprintf(stderr, "CRC-16 Table:\n");
         for (unsigned k = 0; k < 256; k++) {
-            printf("%04x ", gCrcTable[k]);
-            if (15 == k & 0xf) printf("\n");
+            fprintf(stderr, "%04x ", gCrcTable[k]);
+            if (15 == k & 0xf) fprintf(stderr, "\n");
         }
     #endif
 }
@@ -70,12 +70,12 @@ static uint16_t crc16compute(uint8_t *bytes, uint16_t len)
         crc   = (uint16_t)((crc >> 8) ^ gCrcTable[index]);
     }
     #if defined DEBUG_CRC
-        printf("CRC computation result 0x%04x from:\n", crc);
+        fprintf(stderr, "CRC computation result 0x%04x from:\n", crc);
         for (unsigned k = 0; k < len; k++) {
-            printf("%02x ", bytes[k]);
-            if (15 == k & 0xf) printf("\n");
+            fprintf(stderr, "%02x ", bytes[k]);
+            if (15 == k & 0xf) fprintf(stderr, "\n");
         }
-        if (0 != len & 0xf) printf("\n");
+        if (0 != len & 0xf) fprintf(stderr, "\n");
     #endif
     return(crc);
 }
@@ -118,10 +118,10 @@ static void openPort(const char *deviceName) {
 #if defined DEBUG_DATA
     static void printData(const char *message, uint8_t *start,
             unsigned length) {
-        printf("%s\n", message);
+        fprintf(stderr, "%s\n", message);
         for (unsigned i = 0; i < length; i++)
-            printf("%02x ", start[i]);
-        printf("\n");
+            fprintf(stderr, "%02x ", start[i]);
+        fprintf(stderr, "\n");
     }
 #else
     #define printData(x, y, z) do { } while (0)
@@ -138,7 +138,7 @@ void dl::init() {
     gStat.recvPackets = 0;
     gStat.badPackets = 0;
     gStat.dropped = 0;
-    for (unsigned i = 0; i < dl::MAX_CHANNEL; i++) {
+    for (unsigned i = 0; i < MAX_CHANNEL; i++) {
         gChannelHandler[i] = NULL;
         gSeq[i] = 0;
     }
@@ -160,7 +160,7 @@ uint8_t dl::send(Buffer &message, unsigned channel, bool wantAck) {
     // add a lock acquisition to this function, to ensure only one
     // transport (i.e. one thread) sends at a time.  I'm not sure if
     // we could get away without it.
-    if (channel >= dl::MAX_CHANNEL) throw "channel number out of range";
+    if (channel >= MAX_CHANNEL) throw "channel number out of range";
     printData("send(): unmodified content", message.content(),
             message.contentLength());
     // Packetize
@@ -259,19 +259,20 @@ static void receiveThreadFn() {
                 // Rotate packet pointers
                 pBuf = pNextBuf;
                 pNextBuf = tmp;
-                // Set up for next read
+                // Set up to continue looking through leftovers for END
                 readPointer = pBuf->mData + nLeftover;
                 readLength = dl::Buffer::SIZE - nLeftover;
-                break;
+                p = pBuf->mData;
+            } else {
+                p++;
             }
-            p++;
         }
         if (readLength == 0) {
             throw "Full buffer but no end of packet.";
         }
     }
     #if defined RDA_CONFIG_debug
-        printf("receiveThreadFn(): normal end\n");
+        fprintf(stderr, "receiveThreadFn(): normal end\n");
     #endif
 }
 
@@ -293,7 +294,7 @@ static dl::Buffer *processPacket(dl::Buffer *pMessage) {
             } else {
                 // presumably a mangled packet
                 gStat.badPackets++;
-                printf("bad escape sequence\n");
+                fprintf(stderr, "bad escape sequence\n");
                 return pMessage;
             }
         } else if (pMessage->mData[i] == ESC) {
@@ -307,7 +308,7 @@ static dl::Buffer *processPacket(dl::Buffer *pMessage) {
     if (afterESC) {
         // trailing ESC: mangled packet
         gStat.badPackets++;
-        printf("trailing escape\n");
+        fprintf(stderr, "trailing escape\n");
         return pMessage;
     }
     // j is the length of the unescaped data
@@ -318,13 +319,13 @@ static dl::Buffer *processPacket(dl::Buffer *pMessage) {
     if ((pMessage->mData[0] + (pMessage->mData[1] << 8)) != crc) {
         // bad CRC
         gStat.badPackets++;
-        printf("bad CRC\n");
+        fprintf(stderr, "bad CRC\n");
         return pMessage;
     }
     if (pMessage->mData[2] != 1) {
         // bad protocol number
         gStat.badPackets++;
-        printf("bad protocol number\n");
+        fprintf(stderr, "bad protocol number\n");
         return pMessage;
     }
     pMessage->contentLength(pMessage->mData[3]
@@ -332,7 +333,7 @@ static dl::Buffer *processPacket(dl::Buffer *pMessage) {
     if (pMessage->mLength != j) {
         // bad packet content length
         gStat.badPackets++;
-        printf("bad packet length\n");
+        fprintf(stderr, "bad packet length\n");
         return pMessage;
     }
     // Note mLength is valid now
@@ -353,7 +354,7 @@ static dl::Buffer *processPacket(dl::Buffer *pMessage) {
 }
 
 void dl::registerCallback(callback_t *callback, unsigned channel) {
-    if (channel < dl::MAX_CHANNEL)
+    if (channel < MAX_CHANNEL)
         gChannelHandler[channel] = callback;
     else throw "channel number too high";
 }

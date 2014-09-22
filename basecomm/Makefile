@@ -21,5 +21,6 @@ include $(RDA_TOP)/build.mk
 
 all: $(RDA_LIB_STATIC)
 
+#$(_OBJDIR)/dataLink.o: CPPFLAGS += -DDEBUG_DATA
 $(_OBJDIR)/odTransport.o: CPPFLAGS += -DDEBUG_EEPROM
 

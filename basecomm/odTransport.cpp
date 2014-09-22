@@ -63,12 +63,12 @@ static uint8_t *odSize;
 
 // Sorry, I have trouble with these verbose Boost type names.
 // Also I find the term "Condition Variable" to be meaningless.
-typedef boost::mutex boostMutex;
-typedef boost::condition_variable boostEvent;
-typedef boost::lock_guard<boost::mutex> boostGuard;
+typedef boost::mutex BoostMutex;
+typedef boost::condition_variable BoostEvent;
+typedef boost::lock_guard<boost::mutex> BoostGuard;
 // You need to hold a WaitGuard in order to wait on an Event.
-typedef boost::unique_lock<boost::mutex> boostWaitGuard;
-typedef boost::chrono::steady_clock::time_point boostAbsTime;
+typedef boost::unique_lock<boost::mutex> BoostWaitGuard;
+typedef boost::chrono::steady_clock::time_point BoostAbsTime;
 
 // Hold this lock for the duration of a send - response.
 // E.g. we don't want to send a second request in the middle of retrying.
@@ -76,22 +76,22 @@ typedef boost::chrono::steady_clock::time_point boostAbsTime;
 // Only one transaction at a time regardless of the transport.
 // The MPIC isn't implemented to do multiple things at once.
 // So, come to think of it, this mutex may belong in the Data Link layer.
-boostMutex gTransportMutex;
+BoostMutex gTransportMutex;
 
 // We have to provide one buffer so we can hold on to the responses
 // after the responseCallback returns.
 static dl::Buffer ourResponseBuffer;
 
 // Use this mutex for accessing gotResponse and pResponseBuffer
-boostMutex gResponseMutex;
+BoostMutex gResponseMutex;
 bool gGotResponse;
 static dl::Buffer *gpResponseBuffer;
 // Signal from receive thread to whoever sent a packet,
 // that the response is come.
-boostEvent gResponseEvent;
+BoostEvent gResponseEvent;
 
 // Mutex for accessing telemetry related data
-boostMutex gTelemetryMutex;
+BoostMutex gTelemetryMutex;
 // Telemetry names, values, number of items
 odt::OdName *gTelemetryNames;
 uint32_t *gTelemetryValues;
@@ -131,12 +131,12 @@ bool odt::setOdVersion() {
         case 6:
             odIndex = od_v6_map;
             odSize = od_v6_size;
-            printf("Using version 6 object dictionary.\n");
+            fprintf(stderr, "Using version 6 object dictionary.\n");
             break;
         case 7:
             odIndex = od_v7_map;
             odSize = od_v7_size;
-            printf("Using version 7 object dictionary.\n");
+            fprintf(stderr, "Using version 7 object dictionary.\n");
             break;
         default:
             return true;
@@ -177,10 +177,10 @@ bool odt::getMultiple(OdName *names, uint32_t *outValues, unsigned n) {
 // Note that names and outValues are what we expect to get in the response.
 static bool sendReceive(dl::Buffer &buf, odt::OdName *names, uint32_t
         *outValues, unsigned n) {
-    boostGuard transportGuard(gTransportMutex);
+    BoostGuard transportGuard(gTransportMutex);
     {
         // discard any pending response (shouldn't happen)
-        boostGuard responseGuard(gResponseMutex);
+        BoostGuard responseGuard(gResponseMutex);
         gGotResponse = false;
     }
     // If we're not getting any values back then we want an ACK.
@@ -188,9 +188,9 @@ static bool sendReceive(dl::Buffer &buf, odt::OdName *names, uint32_t
     // wait for response and parse it
     bool timedOut = false;
     while (!timedOut) {
-        boostAbsTime deadline = boost::chrono::steady_clock::now()
+        BoostAbsTime deadline = boost::chrono::steady_clock::now()
             + boost::chrono::milliseconds(100);
-        boostWaitGuard responseGuard(gResponseMutex);
+        BoostWaitGuard responseGuard(gResponseMutex);
         while (!gGotResponse && !timedOut) {
             timedOut = gResponseEvent.wait_until(responseGuard, deadline);
         }
@@ -223,11 +223,11 @@ static bool parseValues(uint8_t seq, dl::Buffer *pBuf, odt::OdName *names,
         return true;
     }
     #if defined DEBUG_DATA
-        printf("parseValues(): raw content is");
+        fprintf(stderr, "parseValues(): raw content is");
         for (unsigned i = 0; i < pBuf->contentLength(); i++) {
-            printf(" %02x", pBuf->content()[i]);
+            fprintf(stderr, " %02x", pBuf->content()[i]);
         }
-        printf("\n");
+        fprintf(stderr, "\n");
     #endif
     // We could also check if n == 0 then pBuf->flagIsAck() should be true.
     uint8_t *p = pBuf->content();
@@ -243,7 +243,7 @@ static bool parseValues(uint8_t seq, dl::Buffer *pBuf, odt::OdName *names,
 }
 
 static dl::Buffer *responseCallback(dl::Buffer *message) {
-    boostGuard responseGuard(gResponseMutex);
+    BoostGuard responseGuard(gResponseMutex);
     gGotResponse = true;
     dl::Buffer *tmp = gpResponseBuffer;
     gpResponseBuffer = message;
@@ -338,12 +338,12 @@ unsigned odt::eeWrite() {
         nanosleep(&oneSecond, NULL);
     }
     #if defined DEBUG_EEPROM
-        printf("Write first command: %f\n", delta(ts2, ts1));
-        printf("Response: %f\n", delta(ts3, ts2));
-        printf("Write second command: %f\n", delta(ts4, ts3));
-        printf("Response: %f\n", delta(ts5, ts4));
-        printf("Write third command: %f\n", delta(ts6, ts5));
-        printf("Response: %f\n", delta(ts7, ts6));
+        fprintf(stderr, "Write first command: %f\n", delta(ts2, ts1));
+        fprintf(stderr, "Response: %f\n", delta(ts3, ts2));
+        fprintf(stderr, "Write second command: %f\n", delta(ts4, ts3));
+        fprintf(stderr, "Response: %f\n", delta(ts5, ts4));
+        fprintf(stderr, "Write third command: %f\n", delta(ts6, ts5));
+        fprintf(stderr, "Response: %f\n", delta(ts7, ts6));
     #endif
     return eeprom_err;
 }
@@ -354,7 +354,7 @@ unsigned odt::eeWrite() {
 
 static dl::Buffer *telemetryCallback(dl::Buffer *message) {
     // TODO implement
-    printf("Got a telemetry packet.\n");
+    fprintf(stderr, "Got a telemetry packet.\n");
     return message;
 }
 
@@ -374,7 +374,7 @@ bool odt::setUpTelemetry(OdName *names, uint32_t *outValues, unsigned n,
         errPrint("setUpTelemetry(): Too many telemetry entries.\n");
         return true;
     }
-    boostGuard guard(gTelemetryMutex);
+    BoostGuard guard(gTelemetryMutex);
     // TODO implement
     return true;  // as long as it's incomplete
 }
