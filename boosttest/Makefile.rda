@@ -1,6 +1,7 @@
 # RDA-style makefile
 
-SOURCES := timed_wait_test.cpp
+#SOURCES := timed_wait_test.cpp
+TESTS := timed_wait_test.cpp timed_wait_test_niall.cpp
 DEFINES += BOOST_TEST_DYN_LINK
 LDLIBS += -lpthread
 
@@ -12,7 +13,7 @@ RELEASE := $(word 2,$(subst ., ,$(shell lsb_release -r)))
 RDA_TOP := ..
 include $(RDA_TOP)/build.mk
 
-all: $(RDA_EXEC)
+#all: $(RDA_EXEC)
 
 ifeq ($(TARGET),imx27)
 
